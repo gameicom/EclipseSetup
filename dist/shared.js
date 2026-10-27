@@ -29,7 +29,7 @@ export function parseSnapshot(row) {
   return { ...row, bosses:settings.bosses, revision };
 }
 export class SharedTimer {
-  constructor({ client, clientId = crypto.randomUUID(), onSnapshot = () => {}, onStatus = () => {}, now = Date.now, refreshInterval = 300000 }) {
+  constructor({ client, clientId = crypto.randomUUID(), onSnapshot = () => {}, onStatus = () => {}, now = Date.now, refreshInterval = 3600000 }) {
     this.client = client;
     this.clientId = clientId;
     this.onSnapshot = onSnapshot;

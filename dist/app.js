@@ -311,7 +311,7 @@ window.addEventListener('storage', event => {
   catch {}
 });
 document.addEventListener('visibilitychange', () => {
-  if(!document.hidden) {void shared?.refresh(); tick();}
+  if(!document.hidden) tick();
 });
 window.addEventListener('online', () => {void shared?.refresh();});
 window.addEventListener('beforeunload', () => {void shared?.stop();});
