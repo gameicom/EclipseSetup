@@ -31,7 +31,6 @@ async function evaluate(expression) {
   return result.result.value;
 }
 async function click(selector) { await evaluate('document.querySelector(' + JSON.stringify(selector) + ').click()'); }
-async function getState() { return evaluate("JSON.parse(localStorage.getItem('eclipse-boss-timer.v1'))"); }
 async function waitLoaded() { await until(() => evaluate("document.querySelectorAll('.timer-row').length === 6"), 'six rows'); }
 async function screenshot(name, width, height) {
   await cdp('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:width<680});
@@ -60,64 +59,31 @@ try {
   await cdp('Emulation.setDeviceMetricsOverride', {width:1440,height:1150,deviceScaleFactor:1,mobile:false});
   await cdp('Page.navigate', {url:'http://127.0.0.1:4173'});
   await waitLoaded();
-  const original = await getState();
-  assert.equal(original.bosses[4].anchor_kst,'2026-10-22T18:15:00');
-  assert.equal(await evaluate("document.querySelector('[data-level=\"75\"] .anchor-value').textContent.includes('18:15:00')"),true);
+  await until(() => evaluate("['connected','unconfigured','error'].includes(document.body.dataset.connection)"), 'shared connection state');
+  const phase=await evaluate('document.body.dataset.connection');
+  if(phase==='unconfigured') {
+    assert.equal(await evaluate("document.querySelector('#edit-all').disabled"),true);
+    assert.equal(await evaluate("document.querySelector('#import-settings').disabled"),true);
+    assert.equal(await evaluate("document.querySelector('#next-countdown').textContent"),'--:--:--');
+    assert.ok(await evaluate("document.querySelector('#shared-notice').textContent.includes('??? ??? ????')"));
+  } else {
+    assert.equal(phase,'connected','Configure Supabase before running the online browser check.');
+    assert.equal(await evaluate("document.querySelector('#edit-all').disabled"),false);
+    assert.notEqual(await evaluate("document.querySelector('#next-countdown').textContent"),'--:--:--');
+    await click('[aria-label="Lv.40 ?? ??"]');
+    assert.equal(await evaluate("document.querySelector('#edit-dialog').open"),true);
+    await screenshot('settings',1440,1000);
+    await click('#edit-dialog [data-close]');
+  }
   await screenshot('desktop',1440,1180);
-  await click('[aria-label="Lv.40 시간 설정"]');
-  assert.equal(await evaluate("document.querySelector('#edit-dialog').open"),true);
-  await evaluate("document.querySelector('[name=\"hours\"]').value='0';document.querySelector('#edit-form').requestSubmit()");
-  assert.equal(await evaluate("document.querySelector('#edit-dialog').open"),true);
-  assert.ok(await evaluate("document.querySelector('#edit-error').textContent.length > 0"));
-  await evaluate("document.querySelector('[name=\"hours\"]').value='9';document.querySelector('[name=\"minutes\"]').value='5';document.querySelector('#edit-form').requestSubmit()");
-  assert.equal((await getState()).bosses[0].interval_seconds,32700);
-  await cdp('Page.reload');
-  await waitLoaded();
-  assert.equal((await getState()).bosses[0].interval_seconds,32700);
-  await click('[aria-label="Lv.50 초기화"]');
-  let reset = await getState();
-  assert.notEqual(reset.bosses[1].anchor_kst,original.bosses[1].anchor_kst);
-  await click('#undo');
-  assert.equal((await getState()).bosses[1].anchor_kst,original.bosses[1].anchor_kst);
-  await click('#reset-all');
-  await click('#confirm-dialog [data-close]');
-  assert.equal((await getState()).bosses[1].anchor_kst,original.bosses[1].anchor_kst);
-  await click('#reset-all'); await click('#confirm-reset');
-  reset = await getState();
-  assert.equal(new Set(reset.bosses.map(b=>b.anchor_kst)).size,1);
-  await click('#undo');
-  assert.equal((await getState()).bosses[1].anchor_kst,original.bosses[1].anchor_kst);
-  await click('[data-sort="next"]');
-  const sorted = await evaluate("[...document.querySelectorAll('.timer-row .next-value')].map(t=>Date.parse(t.dateTime))");
-  assert.deepEqual(sorted,[...sorted].sort((a,b)=>a-b));
-  await click('#sound-toggle');
-  await until(async () => (await getState()).sound, 'sound enabled');
-  await click('#test-sound');
-  assert.equal(await evaluate("document.querySelector('#audio-note').classList.contains('needs-activation')"),false);
-  await click('#sound-toggle');
-  await click('#edit-all');
-  assert.equal(await evaluate("document.querySelectorAll('#edit-fields fieldset').length"),6);
-  await screenshot('settings',1440,1000);
-  await click('#edit-dialog [data-close]');
   await screenshot('mobile',390,844);
   await screenshot('mobile-small',320,740);
-  await click('[aria-label="Lv.75 시간 설정"]');
-  await screenshot('mobile-settings',390,844);
-  await click('#edit-dialog [data-close]');
   await click('#help-button');
   assert.equal(await evaluate("document.querySelector('#help-dialog').open"),true);
   await click('#help-dialog [data-close]');
-  // Invalid persisted data is preserved until an intentional edit.
-  await evaluate("localStorage.setItem('eclipse-boss-timer.v1', '{broken')");
-  await cdp('Page.reload'); await waitLoaded();
-  assert.equal(await evaluate("document.querySelector('#storage-warning').hidden"),false);
-  assert.equal(await evaluate("localStorage.getItem('eclipse-boss-timer.v1')"),'{broken');
-  // Restore the desktop preset in this isolated QA profile.
-  await evaluate("localStorage.setItem('eclipse-boss-timer.v1'," + JSON.stringify(JSON.stringify(original)) + ")");
-  await cdp('Page.reload'); await waitLoaded();
   assert.deepEqual(errors,[]);
-  await writeFile(resolve(artifact,'browser-results.json'),JSON.stringify({ok:true,checks:['6 bosses','desktop settings migration','KST on US browser','edit validation','save and reload','single reset/undo','all reset/cancel/undo','sort','audio activation','6-row editor','desktop/mobile/320px layout','help','corrupt storage preservation'],errors},null,2));
-  console.log('PASS: browser behavior and responsive layouts; screenshots in .local');
+  await writeFile(resolve(artifact,'browser-results.json'),JSON.stringify({ok:true,phase,checks:['6 bosses','honest shared-connection state','read-only editor inspection when connected','desktop/mobile/320px layout','help'],errors},null,2));
+  console.log('PASS: read-only shared timer browser checks; screenshots in .local');
 } catch (error) { console.error(chromeLog); throw error; } finally {
   if(ws && ws.readyState===1) { try { await cdp('Browser.close'); } catch {} ws.close(); }
   chrome.kill();

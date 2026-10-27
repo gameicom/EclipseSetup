@@ -1,0 +1,2 @@
+@supabase/supabase-js 2.118.0
+NPM integrity verified (SHA-512).
