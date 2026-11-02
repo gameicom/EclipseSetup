@@ -21,7 +21,7 @@ before(async()=>{
 });
 after(()=>db.close());
 beforeEach(async()=>{
- await db.exec("reset role; truncate public.eclipse_push_subscriptions cascade; update public.eclipse_push_config set enabled=true,public_key='test-key',last_checked=clock_timestamp()-interval '90 seconds' where id=1;");
+ await db.exec("reset role; truncate public.eclipse_push_subscriptions cascade; update public.eclipse_push_config set enabled=true,public_key='test-key',last_checked=clock_timestamp()-interval '90 seconds',broadcast_requested_at=null where id=1;");
  const now=Date.now();
  const bosses=[40,50,60,70,75,80].map((level,index)=>({level,interval_seconds:28800,anchor_kst:kstISO(now+(index?86400000:-40000))}));
  await db.query('update public.eclipse_timer_state set bosses=$1 where id=1',[JSON.stringify(bosses)]);
@@ -33,7 +33,7 @@ async function seeded() {
  await role('service_role');
 }
 test('public visitors cannot read private endpoints or trigger delivery',async()=>{
- assert.equal((await run('eclipse_push_info')).enabled,true);
+ const info=await run('eclipse_push_info');assert.equal(info.enabled,true);assert.equal(info.test_audience,'all');
  await save();
  await assert.rejects(db.query('select * from public.eclipse_push_subscriptions'),/permission denied/);
  await assert.rejects(run('eclipse_push_claim'),/permission denied/);
@@ -87,15 +87,17 @@ test('new subscribers do not get earlier alarms and old missed alarms are not re
  await role('service_role');
  assert.equal(await run('eclipse_push_enqueue'),0);
 });
-test('test delivery is device-local and rate limited; expired endpoints are removed',async()=>{
+test('test delivery reaches all subscribers with one shared cooldown and expired endpoints are removed',async()=>{
  await save();await save(B,other);
  await run('eclipse_push_test',[A,token]);
  await assert.rejects(run('eclipse_push_test',[A,token]),/WAIT_ONE_MINUTE/);
+ await assert.rejects(run('eclipse_push_test',[B,other]),/WAIT_ONE_MINUTE/);
  await role('service_role');
  const jobs=await run('eclipse_push_claim');
- assert.equal(jobs.length,1);
- assert.equal(jobs[0].subscription.endpoint,sub(A).endpoint);
- await run('eclipse_push_finish',[jobs[0].id,'gone']);
+ assert.equal(jobs.length,2);
+ assert.deepEqual(jobs.map(job=>job.subscription.endpoint).sort(),[sub(A).endpoint,sub(B).endpoint].sort());
+ assert.deepEqual(jobs[0].payload,jobs[1].payload);
+ await run('eclipse_push_finish',[jobs.find(job=>job.subscription.endpoint===sub(A).endpoint).id,'gone']);
  await role('anon');
  assert.equal(await run('eclipse_push_status',[A,token]),false);
  assert.equal(await run('eclipse_push_status',[B,other]),true);
@@ -111,14 +113,15 @@ test('temporary failures retry after a lease but stop after three attempts',asyn
  }
  assert.equal((await run('eclipse_push_claim')).length,0);
 });
-test('push migration preserves device registrations and current timer times',async()=>{
- await save();
+test('push migration preserves device registrations, shared times and the broadcast cooldown',async()=>{
+ await save();await run('eclipse_push_test',[A,token]);
  const before=(await db.query('select bosses from public.eclipse_timer_state')).rows[0].bosses;
  await db.exec('reset role;');
  await db.exec(await readFile(new URL('../supabase/push.sql',import.meta.url),'utf8'));
  await role('anon');
  assert.equal(await run('eclipse_push_status',[A,token]),true);
  assert.deepEqual((await db.query('select bosses from public.eclipse_timer_state')).rows[0].bosses,before);
+ await assert.rejects(run('eclipse_push_test',[A,token]),/WAIT_ONE_MINUTE/);
 });
 test('volume supports mute, preserves legacy preferences and schedules louder non-overlapping pulses',()=>{
  assert.deepEqual(readAudioPreference({sound:true}),{sound:true,volume:80});
@@ -195,8 +198,9 @@ test('manual push sends the nearest repeating boss now without changing shared t
  assert.deepEqual((await db.query('select bosses from public.eclipse_timer_state')).rows[0].bosses,bosses);
  await role('service_role');
  const jobs=await run('eclipse_push_claim');
- assert.equal(jobs.length,1,'test is ready immediately, not at the future boss time');
- assert.equal(jobs[0].subscription.endpoint,sub(A).endpoint);
+ assert.equal(jobs.length,2,'both test deliveries are ready immediately, not at the future boss time');
+ assert.deepEqual(jobs.map(job=>job.subscription.endpoint).sort(),[sub(A).endpoint,sub(B).endpoint].sort());
+ assert.deepEqual(jobs[0].payload,jobs[1].payload);
  assert.equal(jobs[0].payload.title,'[테스트] Lv.75 필드보스');
  const expected=kstISO(Date.parse(bosses[4].anchor_kst+'+09:00')+300000);
  assert.equal(jobs[0].payload.body,'다음 리젠 · '+expected.slice(5,10).replace('-','/')+' '+expected.slice(11)+' (한국시간)');
@@ -234,4 +238,15 @@ test('manual push rejects a disabled server without consuming the test allowance
  await db.exec('reset role; update public.eclipse_push_config set enabled=true;');
  await role('anon');assert.equal(await run('eclipse_push_test',[A,token]),true);
  await role('service_role');assert.equal((await run('eclipse_push_claim')).length,1);
+});
+
+test('opted-out devices are excluded from broadcasts and queued copies are removed on opt-out',async()=>{
+ const C='cccccccc-cccc-4ccc-cccc-cccccccccccc',third='c'.repeat(43);
+ await save();await save(B,other);await save(C,third);
+ await run('eclipse_push_remove',[B,other]);
+ await assert.rejects(run('eclipse_push_test',[B,other]),/PUSH_ACCESS_DENIED/);
+ await run('eclipse_push_test',[A,token]);
+ await run('eclipse_push_remove',[C,third]);
+ await role('service_role');const jobs=await run('eclipse_push_claim');
+ assert.equal(jobs.length,1);assert.equal(jobs[0].subscription.endpoint,sub(A).endpoint);
 });

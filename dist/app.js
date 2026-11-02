@@ -330,7 +330,11 @@ function renderPushStatus(controller) {
   $('push-toggle').disabled=controller.busy || !controller.ready;
   $('push-toggle').setAttribute('aria-checked',String(controller.enabled));
   $('push-toggle-label').textContent=controller.enabled ? '푸시 켜짐' : '푸시 켜기';
-  $('test-push').disabled=controller.busy || !controller.enabled;
+  const broadcastReady=controller.info?.test_audience==='all';
+  $('test-push').disabled=controller.busy || !controller.enabled || !broadcastReady;
+  $('push-test-help').textContent=controller.ready && !broadcastReady
+    ? '전체 전송을 사용하려면 관리자용 최초 설정에서 푸시 서버 업데이트 SQL을 적용한 뒤 새로고침해 주세요.'
+    : '가장 가까운 보스의 예정 시간을 푸시를 켠 모든 기기에 보냅니다. 보통 1분 이내 도착하며, 전체 테스트 전송은 1분에 한 번 가능합니다.';
   $('test-push').textContent=controller.busy ? '처리 중…' : '전송';
   $('push-note').textContent=controller.message;
 }

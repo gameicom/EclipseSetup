@@ -23,7 +23,7 @@ beforeEach(()=>{
  replace('localStorage',{getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value)});
  client={async rpc(name,args){
   calls.push(name);
-  if(name==='eclipse_push_info')return {data:{enabled:true,public_key:publicKey},error:null};
+  if(name==='eclipse_push_info')return {data:{enabled:true,public_key:publicKey,test_audience:'all'},error:null};
   if(name==='eclipse_push_status')return {data:owned,error:null};
   if(name==='eclipse_push_save' && failSave)return {data:null,error:{message:'unavailable'}};
   if(name==='eclipse_push_save')owned=true;
@@ -106,5 +106,17 @@ test('test push requires this device to be enabled and reports throttling withou
  await assert.rejects(push.test(),/1분에 한 번/);
  assert.equal(push.message,before);
  client.rpc=async()=>({data:true,error:null});
- await push.test();assert.match(push.message,/가장 가까운 보스/);
+ await push.test();assert.match(push.message,/가장 가까운 보스/);assert.match(push.message,/모든 기기/);
+});
+
+test('a new sender never uses the previous device-only SQL for a broadcast',async()=>{
+ const originalRpc=client.rpc;
+ client.rpc=async(name,args)=>{
+  const result=await originalRpc(name,args);
+  if(name==='eclipse_push_info')delete result.data.test_audience;
+  return result;
+ };
+ const push=new PushAlerts(client);await push.init();await push.enable();calls=[];
+ await assert.rejects(push.test(),/업데이트 SQL/);
+ assert.ok(!calls.includes('eclipse_push_test'));
 });

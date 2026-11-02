@@ -9,6 +9,9 @@
 <p class="eyebrow">ADMIN · ONE-TIME SETUP</p><h1>웹 푸시 최초 설정</h1>
 <p class="admin-intro">관리자가 한 번만 설정합니다. 이용자는 타이머에서 ‘푸시 켜기’만 누르면 됩니다.<br>모든 설정은 이 페이지와 Supabase 웹 관리 화면에서 진행합니다.</p>
 <div class="notice" id="setup-status" role="status">현재 서버 설정을 확인하고 있습니다.</div>
+<section class="setup-step" id="server-update" hidden><h2>기존 푸시 서버 업데이트</h2>
+<p>아래 SQL을 복사해 Supabase SQL Editor에서 실행하세요. 기존 알림 키·구독·보스 시간을 유지하면서 전체 전송 기능을 적용합니다. 실행 후 타이머를 새로고침하세요.</p>
+<div class="setup-actions"><button class="button primary" id="copy-update" disabled>업데이트 SQL 복사</button><a class="button secondary" href="https://supabase.com/dashboard/project/xywqclfppwsiiydlniba/sql/new" target="_blank" rel="noopener noreferrer">SQL Editor 열기 ↗</a></div></section>
 <section class="setup-step"><h2>1. 서버 알림 키 등록</h2>
 <p>아래 버튼으로 이 브라우저에서 알림 키를 만듭니다. 생성된 값은 서버 등록용이며 채팅이나 GitHub에 올리지 않습니다. 설정을 마칠 때까지 이 탭을 열어 두세요.</p>
 <div class="setup-actions"><button class="button primary" id="generate-keys" disabled>최초 설정용 키 만들기</button><a class="button secondary" href="https://supabase.com/dashboard/project/xywqclfppwsiiydlniba/functions/secrets" target="_blank" rel="noopener noreferrer">Supabase Secrets 열기 ↗</a></div>

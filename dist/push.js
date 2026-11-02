@@ -14,7 +14,7 @@ export class PushAlerts {
   async rpc(name,args={}) {
     const {data,error}=await this.client.rpc(name,args);
     if(error) {
-      const messages={WAIT_ONE_MINUTE:'테스트 전송은 1분에 한 번 가능합니다. 잠시 후 다시 눌러 주세요.',
+      const messages={WAIT_ONE_MINUTE:'전체 테스트 전송은 1분에 한 번 가능합니다. 다른 사용자가 방금 전송했을 수 있습니다. 잠시 후 다시 눌러 주세요.',
         PUSH_TIMER_UNAVAILABLE:'공동 보스 시간을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
         PUSH_NOT_CONFIGURED:'푸시 서버 설정을 먼저 완료해 주세요.',
         PUSH_ACCESS_DENIED:'이 기기의 푸시 등록을 확인할 수 없습니다. 푸시를 껐다가 다시 켜 주세요.'};
@@ -94,7 +94,8 @@ export class PushAlerts {
   }
   async test() {
     if(!this.enabled || !this.device) throw new Error('먼저 이 기기의 푸시를 켜 주세요.');
+    if(this.info?.test_audience!=='all') throw new Error('전체 전송을 사용하려면 관리자용 최초 설정에서 푸시 서버 업데이트 SQL을 적용해 주세요.');
     await this.rpc('eclipse_push_test',{p_device:this.device.id,p_token:this.device.token});
-    this.emit('가장 가까운 보스의 테스트 푸시를 요청했습니다. 이 기기로 보통 1분 이내에 도착합니다.');
+    this.emit('푸시를 켠 모든 기기에 가장 가까운 보스의 테스트 알림을 요청했습니다. 보통 1분 이내에 도착합니다.');
   }
 }

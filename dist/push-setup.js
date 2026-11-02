@@ -31,6 +31,7 @@ $('generate-keys').addEventListener('click',async()=>{
 });
 $('copy-secrets').addEventListener('click',()=>copy(prepared.secrets));
 $('copy-function').addEventListener('click',()=>copy(materials.functionCode));
+$('copy-update').addEventListener('click',()=>copy(materials.schema));
 $('copy-sql').addEventListener('click',()=>copy(prepared.sql));
 $('verify-push').addEventListener('click',async()=>{
  $('verify-push').disabled=true;
@@ -57,7 +58,9 @@ try {
  $('copy-function').disabled=false;
  const info=await getInfo();
  if(info?.public_key) {
-  status(info.enabled?'이미 푸시 서버가 설정되어 있습니다. 타이머에서 푸시를 켜고 테스트하세요.':'기존 알림 키가 있습니다. Supabase의 발송기와 Cron 상태를 확인하세요. 키를 다시 만들지는 않습니다.');
+  $('server-update').hidden=false;
+  $('copy-update').disabled=false;
+  status(info.enabled?'푸시 서버가 설정되어 있습니다. 기능 변경을 적용하려면 아래 업데이트 SQL을 실행한 뒤 타이머를 새로고침하세요.':'기존 알림 키가 있습니다. Supabase의 발송기와 Cron 상태를 확인하세요. 키를 다시 만들지는 않습니다.');
  } else {
   $('generate-keys').disabled=false;status('최초 설정이 필요합니다. 아래 1단계부터 진행하세요. 별도 프로그램 설치는 필요하지 않습니다.');
  }

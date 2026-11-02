@@ -5,6 +5,7 @@ create table if not exists public.eclipse_push_config (
   public_key text not null default '', last_checked timestamptz not null default clock_timestamp()
 );
 insert into public.eclipse_push_config(id) values(1) on conflict do nothing;
+alter table public.eclipse_push_config add column if not exists broadcast_requested_at timestamptz;
 create table if not exists public.eclipse_push_subscriptions (
   device_id uuid primary key, token_hash text not null, subscription jsonb not null,
   endpoint text not null unique, created_at timestamptz not null default clock_timestamp(),
@@ -27,7 +28,7 @@ revoke all on sequence public.eclipse_push_jobs_id_seq from public,anon,authenti
 create or replace function public.eclipse_push_info()
 returns jsonb language sql stable security definer set search_path='' as $$
  select jsonb_build_object('enabled',enabled and last_checked > now()-interval '3 minutes',
-   'public_key',public_key) from public.eclipse_push_config where id=1;
+   'public_key',public_key,'test_audience','all') from public.eclipse_push_config where id=1;
 $$;
 create or replace function public.eclipse_push_owns(p_device uuid,p_token text)
 returns boolean language sql stable security definer set search_path='' as $$
@@ -83,8 +84,13 @@ returns boolean language plpgsql security definer set search_path='' as $$
 declare v_now timestamptz:=clock_timestamp(); v_level integer; v_due timestamptz;
 begin
  if not public.eclipse_push_owns(p_device,p_token) then raise exception 'PUSH_ACCESS_DENIED' using errcode='42501'; end if;
- if not exists(select 1 from public.eclipse_push_config where id=1 and enabled)
- then raise exception 'PUSH_NOT_CONFIGURED'; end if;
+ -- Serialize broadcasts across devices, sharing one cooldown for all recipients.
+ perform 1 from public.eclipse_push_config where id=1 and enabled for update;
+ if not found then raise exception 'PUSH_NOT_CONFIGURED'; end if;
+ v_now:=clock_timestamp();
+ if exists(select 1 from public.eclipse_push_config where id=1
+  and broadcast_requested_at>=v_now-interval '1 minute')
+ then raise exception 'WAIT_ONE_MINUTE'; end if;
  -- Select from current shared settings using server time, including future anchors.
  select level,due into v_level,v_due from (
   select level,case when anchor>v_now then anchor else
@@ -98,15 +104,14 @@ begin
   ) settings
  ) upcoming order by due,level limit 1;
  if not found then raise exception 'PUSH_TIMER_UNAVAILABLE'; end if;
- update public.eclipse_push_subscriptions set test_requested_at=v_now
- where device_id=p_device and (test_requested_at is null or test_requested_at<v_now-interval '1 minute');
- if not found then raise exception 'WAIT_ONE_MINUTE'; end if;
+ update public.eclipse_push_config set broadcast_requested_at=v_now where id=1;
+ update public.eclipse_push_subscriptions set test_requested_at=v_now where device_id=p_device;
  insert into public.eclipse_push_jobs(device_id,event_key,payload,due_at)
- values(p_device,'test:'||floor(extract(epoch from v_now)/60)::text,
+ select device_id,'test:'||floor(extract(epoch from v_now)/60)::text,
  jsonb_build_object('title','[테스트] Lv.'||v_level||' 필드보스',
   'body','다음 리젠 · '||to_char(v_due at time zone 'Asia/Seoul','MM/DD HH24:MI:SS')||' (한국시간)',
   'tag','eclipse-push-test','timestamp',floor(extract(epoch from v_now)*1000)),
- v_now) on conflict do nothing;
+ v_now from public.eclipse_push_subscriptions on conflict do nothing;
  return true;
 end;
 $$;
