@@ -1,14 +1,16 @@
 {
   "name": "eclipse-boss-timer",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test tests/core.test.mjs tests/shared.test.mjs",
+    "build": "node scripts/prepare-push-setup.mjs",
+    "test": "node --test tests/core.test.mjs tests/shared.test.mjs tests/push.test.mjs tests/push-client.test.mjs",
     "verify:deploy": "node scripts/check-shared-config.mjs --online"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.12"
+    "@electric-sql/pglite": "0.5.12",
+    "web-push": "3.6.7"
   }
 }

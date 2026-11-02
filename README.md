@@ -92,3 +92,41 @@ npm test는 기본 시간 계산과 PostgreSQL 엔진(PGlite)에서 실제 SQL�
 - https://supabase.com/docs/guides/realtime/postgres-changes
 - https://supabase.com/docs/guides/database/functions
 - https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
+
+## 알림음 볼륨과 웹 푸시
+
+웹 화면의 볼륨 슬라이더는 0~100%이며 기본값은 80%입니다. 0%는 무음입니다. 이전보다 큰 삼각파 알림을 6회 재생하며, 소리 테스트도 선택한 볼륨을 사용합니다. 소리 켜기/끄기와 볼륨은 각 브라우저에 저장됩니다. 다른 사용자의 설정에는 영향을 주지 않습니다. 기기 자체 볼륨과 브라우저 자동재생 정책은 별도로 적용됩니다.
+
+푸시는 사이트를 닫은 기기에 서버가 보내는 알림입니다. 각 기기에서 **푸시 켜기**를 누르고 브라우저 알림을 허용합니다. **테스트 알림 보내기**는 서버 큐에 요청을 넣으며 보통 1분 이내에 도착합니다. 푸시 끄기는 해당 기기의 서버 구독을 삭제합니다.
+
+iPhone/iPad는 iOS/iPadOS 16.4 이상에서 Safari의 **공유 → 홈 화면에 추가** 후 웹앱을 실행해 푸시를 켭니다. PC와 Android는 지원 브라우저에서 알림을 허용합니다. 푸시 소리는 웹 볼륨 슬라이더와 별개로 운영체제의 알림 볼륨을 따릅니다. 전원 종료, 네트워크 끊김, 브라우저 강제 종료, 절전 또는 알림 차단 상태에서는 지연되거나 도착하지 않을 수 있습니다.
+
+### 관리자의 최초 설정 — 모두 웹에서 진행
+
+앱 설치 파일이나 명령줄 설치 도구는 사용하지 않습니다. 웹사이트를 배포한 다음, 화면의 **관리자용 최초 설정** 링크(push-setup.html)를 엽니다.
+
+1. 페이지에서 알림 키를 만들고 복사하여 연결된 **Supabase Edge Function Secrets** 웹 화면에 저장합니다.
+2. 발송기 코드를 복사하여 **Edge Functions → Deploy a new function → Via Editor**에 붙여넣고 **boss-push** 이름으로 배포합니다. 해당 함수의 **Verify JWT with legacy secret**을 끕니다. 함수 자체가 서버 발송 전용 키로 요청을 인증합니다.
+3. 페이지의 예약 설정 SQL을 **SQL Editor → New query**에 붙여넣고 Run을 누릅니다.
+4. **서버 연결 확인**을 누른 뒤 타이머를 새로고침하고 각 기기에서 푸시를 켜 테스트합니다.
+
+이 과정은 기존 보스 시간을 변경하지 않습니다. 생성한 비밀 값은 관리자 탭의 메모리에만 준비되며, 저장은 Supabase Secrets와 Vault에 합니다. 채팅·GitHub·공개 웹 소스에 붙여넣지 않습니다. 설정을 마칠 때까지 관리자 탭을 열어 두세요. 이미 알림 키가 등록된 서버는 새로운 키를 만들지 않으며, 발송기 코드만 복사해 갱신할 수 있습니다.
+
+정기 타이머 조회는 **1시간에 1회**입니다. 별도 서버 작업이 1분마다 현재 공동 보스 시간 6개를 확인하고, 보낼 알림이 있을 때만 Edge Function을 호출합니다. 브라우저가 닫혀 있어도 이 작업은 서버에서 실행됩니다. Supabase 프로젝트나 Cron이 중지되면 푸시도 중지됩니다.
+
+발송 큐는 같은 리젠 회차의 중복 등록을 막고, 발송 전 공동 시간이 바뀌었으면 이전 큐를 취소합니다. 실패는 최대 3회 재시도하며 5분 넘게 지난 알림은 보내지 않습니다. 정상 발송의 목표는 1분 이내이나 OS 전달 지연이나 큰 대기열은 보장할 수 없습니다. 전송 결과를 받기 전에 연결이 끊기면 같은 알림이 재시도될 수 있으며, 기기 알림 태그는 같은 회차의 알림을 대체하도록 구성했습니다.
+
+구독 주소와 기기 토큰 해시는 일반 방문자가 조회할 수 없습니다. 기기 토큰을 가진 해당 브라우저만 구독을 수정하거나 해제할 수 있고, 발송 큐 접근은 서버 전용입니다. 현재 구현의 등록 상한은 500기기입니다. 타이머 방문자는 로그인 없이 공동 시간을 편집할 수 있다는 기존 정책을 유지합니다.
+
+서버 배포 권한이 없는 개발 환경에서는 코드 및 로컬 검증까지만 가능하며, **실제 푸시 활성화는 위 Supabase 웹 설정과 기기 수신 테스트 이후**입니다.
+
+검증은 PostgreSQL에서 구독 권한, 중복 방지, 오래된 일정 취소, 실패 재시도와 해제를 실행합니다. 브라우저 API 대역으로 권한 거부, 등록 실패 정리, 구독 해제 후 재등록 방지와 서비스 워커 알림 동작을 확인하고, 실제 web-push 암호화 코드도 검사합니다. 이 검증은 실제 휴대폰/PC의 알림 수신 확인을 대체하지 않습니다.
+
+관련 파일: dist/audio.js, dist/push.js, dist/sw.js, dist/manifest.webmanifest, dist/push-setup.html, supabase/push.sql, supabase/push-cron.sql, supabase/functions/boss-push/.
+관리자 페이지의 복사용 자료는 **npm run build**가 서버 원본으로부터 생성합니다. GitHub Actions도 배포 전에 이 단계를 실행합니다.
+
+공식 참고:
+- https://supabase.com/docs/guides/functions/schedule-functions
+- https://supabase.com/docs/guides/functions/quickstart-dashboard
+- https://supabase.com/docs/guides/functions/secrets
+- https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://xywqclfppwsiiydlniba.supabase.co; base-uri 'self'; form-action 'none'">
+<title>푸시 최초 설정 · 이클립스</title><link rel="icon" href="./assets/timer.ico"><link rel="stylesheet" href="./style.css">
+<script type="module" src="./push-setup.js"></script></head>
+<body><main class="admin-shell"><a class="text-button" href="./">← 타이머로 돌아가기</a>
+<p class="eyebrow">ADMIN · ONE-TIME SETUP</p><h1>웹 푸시 최초 설정</h1>
+<p class="admin-intro">관리자가 한 번만 설정합니다. 이용자는 타이머에서 ‘푸시 켜기’만 누르면 됩니다.<br>모든 설정은 이 페이지와 Supabase 웹 관리 화면에서 진행합니다.</p>
+<div class="notice" id="setup-status" role="status">현재 서버 설정을 확인하고 있습니다.</div>
+<section class="setup-step"><h2>1. 서버 알림 키 등록</h2>
+<p>아래 버튼으로 이 브라우저에서 알림 키를 만듭니다. 생성된 값은 서버 등록용이며 채팅이나 GitHub에 올리지 않습니다. 설정을 마칠 때까지 이 탭을 열어 두세요.</p>
+<div class="setup-actions"><button class="button primary" id="generate-keys" disabled>최초 설정용 키 만들기</button><a class="button secondary" href="https://supabase.com/dashboard/project/xywqclfppwsiiydlniba/functions/secrets" target="_blank" rel="noopener noreferrer">Supabase Secrets 열기 ↗</a></div>
+<textarea id="setup-secrets" aria-label="서버에 등록할 알림 키" readonly spellcheck="false" autocomplete="off" placeholder="키를 만들면 여기에 표시됩니다."></textarea>
+<button class="button secondary" id="copy-secrets" disabled>서버 알림 키 복사</button><p>복사한 3개 항목을 Secrets에 붙여넣고 Save를 누르세요.</p></section>
+<section class="setup-step"><h2>2. 푸시 발송기 등록</h2>
+<p>Edge Functions에서 <strong>Deploy a new function → Via Editor</strong>를 선택하세요. 기본 코드를 지우고 복사한 코드를 붙여넣어 <strong>boss-push</strong>라는 이름으로 배포합니다.</p>
+<div class="setup-actions"><button class="button secondary" id="copy-function" disabled>발송기 코드 복사</button><a class="button secondary" href="https://supabase.com/dashboard/project/xywqclfppwsiiydlniba/functions" target="_blank" rel="noopener noreferrer">Edge Functions 열기 ↗</a></div>
+<p>배포한 함수의 설정에서 <strong>Verify JWT with legacy secret</strong>을 끄고 저장하세요. 이 함수는 1단계의 발송 전용 키로 요청을 확인합니다.</p></section>
+<section class="setup-step"><h2>3. 리젠 알림 예약 켜기</h2><p>SQL Editor에서 New query를 열고 아래 SQL을 붙여넣어 Run을 누르세요. 기존 공동 보스 시간은 그대로 유지합니다.</p>
+<div class="setup-actions"><button class="button secondary" id="copy-sql" disabled>예약 설정 SQL 복사</button><a class="button secondary" href="https://supabase.com/dashboard/project/xywqclfppwsiiydlniba/sql/new" target="_blank" rel="noopener noreferrer">SQL Editor 열기 ↗</a></div>
+<p>웹 타이머의 정기 조회는 기존 1시간 주기입니다. 별도로 서버가 분마다 리젠 여부를 확인하며, 발송할 알림이 있을 때만 발송기를 호출합니다.</p></section>
+<section class="setup-step"><h2>4. 연결 확인</h2><button class="button primary" id="verify-push" disabled>서버 연결 확인</button><p>연결이 확인되면 타이머로 돌아가 새로고침한 뒤 ‘푸시 켜기’와 ‘테스트 알림 보내기’를 눌러 주세요. 실제 알림은 기기의 허용·절전 설정에 따라 달라집니다.</p></section>
+</main></body></html>

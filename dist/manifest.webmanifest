@@ -1,0 +1,23 @@
+{
+  "id": "./",
+  "name": "이클립스 보스타이머",
+  "short_name": "보스타이머",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101715",
+  "theme_color": "#101715",
+  "icons": [
+    {
+      "src": "./assets/push-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./assets/push-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

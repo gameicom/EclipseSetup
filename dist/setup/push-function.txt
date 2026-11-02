@@ -1,0 +1,77 @@
+// @ts-nocheck
+import webpush from 'npm:web-push@3.6.7';
+export function validPushEndpoint(value) {
+  try {
+    const url=new URL(value);
+    return url.protocol==='https:' && !url.username && !url.password && !url.port && !url.hash
+      && /^(fcm\.googleapis\.com|([a-z0-9-]+\.)*push\.services\.mozilla\.com|web\.push\.apple\.com|[a-z0-9-]+\.notify\.windows\.com)$/.test(url.hostname);
+  } catch {return false;}
+}
+export function createPushHandler({env,generateRequestDetails,fetchImpl=fetch}) {
+  return async request => {
+    const origin=request.headers.get('Origin');
+    const allowedOrigin=['https://gameicom.github.io','http://127.0.0.1:4173','http://localhost:4173'].includes(origin);
+    const cors=allowedOrigin?{'Access-Control-Allow-Origin':origin,'Access-Control-Allow-Headers':'authorization,content-type','Access-Control-Allow-Methods':'POST,OPTIONS','Vary':'Origin'}:{};
+    const respond=(status,body)=>Response.json(body,{status,headers:cors});
+    if(request.method==='OPTIONS') return new Response(null,{status:allowedOrigin?204:403,headers:cors});
+    if(request.method!=='POST') return respond(405,{error:'POST required'});
+    const secret=env('ECLIPSE_PUSH_SECRET');
+    if(!secret) return respond(503,{error:'Push is not configured'});
+    if(request.headers.get('Authorization')!=='Bearer '+secret) return respond(401,{error:'Unauthorized'});
+    const url=env('SUPABASE_URL');
+    let serviceKey=env('SUPABASE_SERVICE_ROLE_KEY');
+    try {const keys=JSON.parse(env('SUPABASE_SECRET_KEYS')||'{}');serviceKey=keys.default||Object.values(keys).find(key=>typeof key==='string'&&key.startsWith('sb_secret_'))||serviceKey;} catch {}
+    const vapidDetails={subject:'https://gameicom.github.io/EclipseSetup/',
+      publicKey:env('ECLIPSE_VAPID_PUBLIC_KEY'),privateKey:env('ECLIPSE_VAPID_PRIVATE_KEY')};
+    if(!url || !serviceKey || !vapidDetails.publicKey || !vapidDetails.privateKey) return respond(503,{error:'Push is not configured'});
+    const rpc=async(name,body={})=>{
+      const response=await fetchImpl(url+'/rest/v1/rpc/'+name,{
+        method:'POST',headers:{apikey:serviceKey,...(serviceKey.split('.').length===3?{Authorization:'Bearer '+serviceKey}:{}),'Content-Type':'application/json'},
+        body:JSON.stringify(body),signal:AbortSignal.timeout(10000),redirect:'error'});
+      if(!response.ok) throw new Error('Database request failed');
+      return response.json();
+    };
+    try {
+      const body=await request.json().catch(()=>({}));
+      if(body.health===true) {
+        const info=await rpc('eclipse_push_info');
+        if(info.public_key!==vapidDetails.publicKey) throw new Error('Key mismatch');
+        // Validate encryption and VAPID signing without sending a notification.
+        generateRequestDetails({endpoint:'https://fcm.googleapis.com/health-check',
+          keys:{p256dh:vapidDetails.publicKey,auth:'AAAAAAAAAAAAAAAAAAAAAA'}},'health',{vapidDetails,TTL:60});
+        return respond(200,{ready:true});
+      }
+      let sent=0,retry=0,removed=0;
+      const deadline=Date.now()+45000;
+      for(let round=0;round<3 && Date.now()<deadline;round++) {
+        const jobs=await rpc('eclipse_push_claim');
+        if(!jobs.length) break;
+        let cursor=0;
+        await Promise.all(Array.from({length:Math.min(10,jobs.length)},async()=>{
+          while(cursor<jobs.length) {
+            const job=jobs[cursor++];
+            let outcome='retry';
+            try {
+              if(!validPushEndpoint(job.subscription?.endpoint)) outcome='gone';
+              else {
+                const details=generateRequestDetails(job.subscription,JSON.stringify(job.payload),{vapidDetails,TTL:180,urgency:'high',contentEncoding:'aes128gcm'});
+                const response=await fetchImpl(details.endpoint,{method:details.method,headers:details.headers,
+                  body:details.body,signal:AbortSignal.timeout(10000),redirect:'error'});
+                outcome=response.ok?'sent':[404,410].includes(response.status)?'gone':'retry';
+                await response.body?.cancel();
+              }
+            } catch {}
+            await rpc('eclipse_push_finish',{p_id:job.id,p_result:outcome});
+            if(outcome==='sent') sent++; else if(outcome==='gone') removed++; else retry++;
+          }
+        }));
+      }
+      return respond(200,{sent,retry,removed});
+    } catch {
+      // Never expose subscription endpoints, keys, or upstream response bodies.
+      return respond(503,{error:'Push dispatch failed; pending deliveries will retry'});
+    }
+  };
+}
+
+Deno.serve(createPushHandler({env:name=>Deno.env.get(name),generateRequestDetails:(...args)=>webpush.generateRequestDetails(...args)}));

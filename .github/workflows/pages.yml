@@ -37,11 +37,18 @@ jobs:
       - name: Install test dependencies
         run: npm ci
 
+      - name: Prepare browser push setup
+        run: npm run build
+
       - name: Check JavaScript and timer behavior
         run: |
           node --check dist/app.js
           node --check dist/core.js
           node --check dist/shared.js
+          node --check dist/audio.js
+          node --check dist/push.js
+          node --check dist/sw.js
+          node --check dist/push-setup.js
           npm test
 
       - name: Verify the shared database connection

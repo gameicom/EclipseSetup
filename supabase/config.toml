@@ -1,0 +1,4 @@
+project_id = "eclipse-boss-timer"
+
+[functions.boss-push]
+verify_jwt = false

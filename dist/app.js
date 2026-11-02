@@ -1,11 +1,14 @@
 import { LEVELS, STORAGE_KEY, defaultSettings, validateSettings, kstISO, parseKST, schedule, remainingText, intervalText, resetBosses, crossedOccurrences } from './core.js';
 import { createSharedTimer } from './shared.js';
 import { sharedConfig } from './shared-config.js';
+import { DEFAULT_VOLUME, normalizeVolume, readAudioPreference, playAlarm } from './audio.js';
+import { PushAlerts } from './push.js';
 const $ = id => document.getElementById(id);
 let state = defaultSettings(), undoState = null, pendingImport = null, sortMode = 'level';
 let previousTick = Date.now(), audioContext = null, toastTimeout, audioBusy = false;
 const rowNodes = new Map();
 const SOUND_KEY = 'eclipse-boss-timer.sound.v2';
+let volume = DEFAULT_VOLUME, pushAlerts = null;
 let shared = null, hasShared = false, connectionPhase = 'connecting', editBase = null, importBase = null;
 const timerNow = () => shared ? shared.now() : Date.now();
 const sameBoss = (a,b) => a?.anchor_kst === b?.anchor_kst && a?.interval_seconds === b?.interval_seconds && a?.level === b?.level;
@@ -17,7 +20,7 @@ function showToast(message) {
 }
 function writeSoundPreference() {
   try {
-    localStorage.setItem(SOUND_KEY, JSON.stringify({sound:state.sound}));
+    localStorage.setItem(SOUND_KEY, JSON.stringify({sound:state.sound,volume}));
     $('storage-warning').hidden = true;
   } catch {
     $('storage-warning').textContent = '알림음 선택을 이 브라우저에 저장하지 못했습니다. 공동 보스 시간은 서버에 저장됩니다.';
@@ -26,7 +29,7 @@ function writeSoundPreference() {
 }
 try {
   const saved = localStorage.getItem(SOUND_KEY) || localStorage.getItem(STORAGE_KEY);
-  if(saved) state.sound = JSON.parse(saved).sound === true;
+  if(saved) {const preference=readAudioPreference(JSON.parse(saved)); state.sound=preference.sound; volume=preference.volume;}
 } catch { state.sound = false; }
 function setSharedStatus({phase}) {
   connectionPhase = phase;
@@ -138,8 +141,11 @@ function render(now = timerNow()) {
   $('edit-form').querySelector('[type="submit"]').disabled = !editable;
   document.querySelectorAll('.row-edit,.row-reset').forEach(button => { button.disabled = !editable; });
   $('sound-toggle').setAttribute('aria-checked', String(state.sound));
-  const needsActivation = state.sound && (!audioContext || audioContext.state !== 'running');
-  $('audio-note').textContent = needsActivation
+  $('sound-volume').value = String(volume);
+  $('sound-volume').setAttribute('aria-valuetext', volume === 0 ? '0% · 음소거' : volume + '%');
+  $('sound-volume-value').value = volume + '%';
+  const needsActivation = state.sound && volume > 0 && (!audioContext || audioContext.state !== 'running');
+  $('audio-note').textContent = state.sound && volume === 0 ? '현재 볼륨은 0%입니다. 알림음을 들으려면 볼륨을 올려 주세요.' : needsActivation
     ? '알림음이 켜져 있습니다. ‘소리 테스트’를 눌러 이 탭에서 오디오를 활성화해 주세요.'
     : '알림음은 이 페이지가 열려 있을 때 작동합니다. 브라우저가 절전 상태가 되면 알림이 늦어질 수 있습니다.';
   $('audio-note').classList.toggle('needs-activation', needsActivation);
@@ -151,23 +157,7 @@ async function enableAudio() {
   if (audioContext.state !== 'running') await audioContext.resume();
   if (audioContext.state !== 'running') throw new Error('브라우저의 소리 허용 설정을 확인해 주세요.');
 }
-function playTone() {
-  if (!audioContext || audioContext.state !== 'running') return;
-  [659.25, 880, 1046.5].forEach((frequency, index) => {
-    const start = audioContext.currentTime + index * 0.15;
-    const oscillator = audioContext.createOscillator(), gain = audioContext.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(0.12, start + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.35);
-    oscillator.connect(gain);
-    gain.connect(audioContext.destination);
-    oscillator.start(start);
-    oscillator.stop(start + 0.36);
-    oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
-  });
-}
+function playTone() { return playAlarm(audioContext,volume); }
 function tick() {
   const now = timerNow(), crossed = hasShared && shared?.ready ? crossedOccurrences(state.bosses, previousTick, now) : [];
   if (crossed.length) {
@@ -270,8 +260,13 @@ $('sound-toggle').addEventListener('click', async () => {
   finally { audioBusy = false; }
 });
 $('test-sound').addEventListener('click', async () => {
-  try { await enableAudio(); playTone(); render(); showToast('테스트 알림음을 재생했습니다.'); }
+  try { await enableAudio(); const played=playTone(); render(); showToast(played ? '테스트 알림음을 재생했습니다.' : '볼륨이 0%입니다. 슬라이더로 볼륨을 올려 주세요.'); }
   catch (error) { showToast(error.message); }
+});
+$('sound-volume').addEventListener('input', event => {
+  volume = normalizeVolume(Number(event.target.value));
+  writeSoundPreference();
+  render();
 });
 $('export-settings').addEventListener('click', () => {
   const url = URL.createObjectURL(new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }));
@@ -307,7 +302,7 @@ $('import-dialog').addEventListener('close', () => {pendingImport = null; import
 $('edit-dialog').addEventListener('close', () => {editBase = null;});
 window.addEventListener('storage', event => {
   if(event.key !== SOUND_KEY || !event.newValue) return;
-  try {state.sound = JSON.parse(event.newValue).sound === true; render();}
+  try {const preference=readAudioPreference(JSON.parse(event.newValue)); state.sound=preference.sound; volume=preference.volume; render();}
   catch {}
 });
 document.addEventListener('visibilitychange', () => {
@@ -321,8 +316,27 @@ setInterval(tick,200);
 try {
   shared = createSharedTimer(sharedConfig,{onSnapshot:acceptSharedSnapshot,onStatus:setSharedStatus});
   void shared.start();
+  pushAlerts = new PushAlerts(shared.client, renderPushStatus);
+  void pushAlerts.init();
 } catch(error) {
   setSharedStatus({phase:'unconfigured'});
   $('shared-notice').hidden = false;
   $('shared-notice').textContent = error.message;
 }
+
+function renderPushStatus(controller) {
+  $('push-toggle').disabled=controller.busy || !controller.ready;
+  $('push-toggle').setAttribute('aria-checked',String(controller.enabled));
+  $('push-toggle-label').textContent=controller.enabled ? '푸시 켜짐' : '푸시 켜기';
+  $('test-push').disabled=controller.busy || !controller.enabled;
+  $('push-note').textContent=controller.message;
+}
+async function pushAction(action) {
+  if(!pushAlerts || pushAlerts.busy) return;
+  pushAlerts.busy=true; pushAlerts.emit();
+  try {await action();}
+  catch(error) {showToast(error.message);}
+  finally {pushAlerts.busy=false;pushAlerts.emit();}
+}
+$('push-toggle').addEventListener('click',()=>pushAction(()=>pushAlerts.enabled?pushAlerts.disable():pushAlerts.enable()));
+$('test-push').addEventListener('click',()=>pushAction(()=>pushAlerts.test()));
