@@ -61,8 +61,12 @@
       <p class="browser-note" id="audio-note">알림음은 이 페이지가 열려 있을 때 작동합니다. 브라우저가 절전 상태가 되면 알림이 늦어질 수 있습니다.</p>
       <section class="push-panel" aria-labelledby="push-heading">
         <div><h2 id="push-heading">사이트를 닫아도 리젠 알림</h2><p id="push-note" role="status">푸시 알림 준비 상태를 확인하고 있습니다.</p></div>
-        <div class="push-actions"><button class="button secondary" id="push-toggle" role="switch" aria-checked="false" disabled><span id="push-toggle-label">푸시 켜기</span></button><button class="text-button" id="test-push" disabled>테스트 알림 보내기</button></div>
+        <div class="push-actions"><button class="button secondary" id="push-toggle" role="switch" aria-checked="false" disabled><span id="push-toggle-label">푸시 켜기</span></button></div>
         <p class="push-help">각 기기에서 한 번씩 켜 주세요. iPhone은 Safari → 공유 → 홈 화면에 추가 후 실행하세요.<br>푸시 소리는 기기의 알림 볼륨을 따릅니다. <a href="./push-setup.html">관리자용 최초 설정</a> · 절전·알림 차단·브라우저 강제 종료 상태에서는 늦거나 도착하지 않을 수 있습니다.</p>
+        <div class="push-test">
+          <div><h3>다음 보스 푸시 테스트</h3><p id="push-test-preview">공동 서버 연결 후 다음 보스가 표시됩니다.</p><p id="push-test-help">전송 시 가장 가까운 보스의 예정 시간을 이 기기에만 보냅니다. 보통 1분 이내 도착하며, 전송은 1분에 한 번 가능합니다.</p></div>
+          <button class="button primary" id="test-push" aria-describedby="push-test-preview push-test-help" disabled>전송</button>
+        </div>
       </section>
     </main>
     <footer class="site-footer"><span><span class="footer-eclipse" aria-hidden="true">◐</span> ECLIPSE <span class="footer-divider">/</span> FIELD BOSS TIMER</span><span>모든 시각은 한국시간 (UTC+9)</span></footer>

@@ -42,3 +42,10 @@ body:not([data-connection="connected"]):not([data-connection="saving"]) .live-la
 .setup-step textarea{display:block;width:100%;min-height:120px;margin:14px 0;padding:12px;resize:vertical;background:#101715;color:var(--text);border:1px solid var(--line);border-radius:6px;font:11px/1.7 var(--mono);overflow-wrap:anywhere}
 .setup-step button:disabled{opacity:.45;cursor:not-allowed}.push-help a{color:var(--accent)}
 @media(max-width:680px){.admin-shell{padding:24px 16px 40px}.setup-step{padding:17px}.admin-shell h1{font-size:25px}.setup-actions .button{font-size:11px}}
+
+.push-test{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:16px;border-top:1px solid var(--line);padding-top:14px}
+.push-test>div{min-width:0}.push-test h3{margin:0 0 7px;font-size:12px;color:var(--text);font-weight:600}
+.push-test #push-test-preview{color:var(--accent);font-variant-numeric:tabular-nums}
+.push-test #push-test-help{margin-top:5px;font-size:10px;color:var(--dim)}
+.push-test .button{flex-shrink:0;min-width:76px}
+@media(max-width:680px){.push-test{flex-wrap:wrap;gap:12px}.push-test .button{width:100%}}

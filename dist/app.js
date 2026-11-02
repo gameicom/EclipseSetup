@@ -110,6 +110,8 @@ function render(now = timerNow()) {
   const ordered = schedule(state.bosses, now), nearest = ordered[0];
   $('next-level').textContent = !hasShared ? '공동 시간 확인 중' : ordered.filter(boss => boss.due === nearest.due).map(boss => 'Lv.' + boss.level).join(' · ');
   const nextWall = formatWall(nearest.due);
+  const pushPreview = hasShared ? 'Lv.' + nearest.level + ' · ' + nextWall.date + ' ' + nextWall.time + ' 리젠 예정 (한국시간)' : '공동 서버 연결 후 다음 보스가 표시됩니다.';
+  if ($('push-test-preview').textContent !== pushPreview) $('push-test-preview').textContent = pushPreview;
   $('next-at').textContent = !hasShared ? '서버 연결 후 리젠 시각이 표시됩니다' : nextWall.date + '  ' + nextWall.time + ' 리젠 예정';
   $('next-countdown').textContent = hasShared ? remainingText(nearest.remaining) : '--:--:--';
   $('next-status').textContent = !hasShared ? '공동 서버 확인 필요' : nearest.soon ? '5분 이내 · 리젠 임박' : '다음 리젠 대기 중';
@@ -329,6 +331,7 @@ function renderPushStatus(controller) {
   $('push-toggle').setAttribute('aria-checked',String(controller.enabled));
   $('push-toggle-label').textContent=controller.enabled ? '푸시 켜짐' : '푸시 켜기';
   $('test-push').disabled=controller.busy || !controller.enabled;
+  $('test-push').textContent=controller.busy ? '처리 중…' : '전송';
   $('push-note').textContent=controller.message;
 }
 async function pushAction(action) {

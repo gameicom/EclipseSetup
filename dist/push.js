@@ -13,7 +13,13 @@ export class PushAlerts {
   emit(message) {if(message) this.message=message; this.onChange(this);}
   async rpc(name,args={}) {
     const {data,error}=await this.client.rpc(name,args);
-    if(error) throw new Error('푸시 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    if(error) {
+      const messages={WAIT_ONE_MINUTE:'테스트 전송은 1분에 한 번 가능합니다. 잠시 후 다시 눌러 주세요.',
+        PUSH_TIMER_UNAVAILABLE:'공동 보스 시간을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+        PUSH_NOT_CONFIGURED:'푸시 서버 설정을 먼저 완료해 주세요.',
+        PUSH_ACCESS_DENIED:'이 기기의 푸시 등록을 확인할 수 없습니다. 푸시를 껐다가 다시 켜 주세요.'};
+      throw new Error(messages[error.message] || '푸시 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    }
     return data;
   }
   supported() {
@@ -89,6 +95,6 @@ export class PushAlerts {
   async test() {
     if(!this.enabled || !this.device) throw new Error('먼저 이 기기의 푸시를 켜 주세요.');
     await this.rpc('eclipse_push_test',{p_device:this.device.id,p_token:this.device.token});
-    this.emit('테스트 알림을 요청했습니다. 탭을 닫아도 보통 1분 이내에 도착합니다.');
+    this.emit('가장 가까운 보스의 테스트 푸시를 요청했습니다. 이 기기로 보통 1분 이내에 도착합니다.');
   }
 }

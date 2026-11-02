@@ -182,3 +182,56 @@ test('web setup health checks support CORS and modern server-only Supabase keys'
  const response=await handler(new Request('https://test/push',{method:'POST',headers:{Origin:origin,Authorization:'Bearer secret'},body:'{"health":true}'}));
  assert.equal(response.status,200);assert.equal((await response.json()).ready,true);
 });
+
+test('manual push sends the nearest repeating boss now without changing shared timers',async()=>{
+ const now=Date.now();
+ const bosses=[40,50,60,70,75,80].map(level=>({level,interval_seconds:28800,anchor_kst:kstISO(now+86400000)}));
+ bosses[0].anchor_kst=kstISO(now-40000);
+ bosses[4]={level:75,interval_seconds:300,anchor_kst:kstISO(now-120000)};
+ await db.exec('reset role;');
+ await db.query('update public.eclipse_timer_state set bosses=$1 where id=1',[JSON.stringify(bosses)]);
+ await role('anon');await save();await save(B,other);
+ assert.equal(await run('eclipse_push_test',[A,token]),true);
+ assert.deepEqual((await db.query('select bosses from public.eclipse_timer_state')).rows[0].bosses,bosses);
+ await role('service_role');
+ const jobs=await run('eclipse_push_claim');
+ assert.equal(jobs.length,1,'test is ready immediately, not at the future boss time');
+ assert.equal(jobs[0].subscription.endpoint,sub(A).endpoint);
+ assert.equal(jobs[0].payload.title,'[테스트] Lv.75 필드보스');
+ const expected=kstISO(Date.parse(bosses[4].anchor_kst+'+09:00')+300000);
+ assert.equal(jobs[0].payload.body,'다음 리젠 · '+expected.slice(5,10).replace('-','/')+' '+expected.slice(11)+' (한국시간)');
+ assert.equal(jobs[0].payload.tag,'eclipse-push-test');
+ assert.ok(jobs[0].payload.timestamp>=now && jobs[0].payload.timestamp<=Date.now());
+});
+
+test('manual push honors future anchors and chooses the lower level when times tie',async()=>{
+ const now=Date.now(),first=kstISO(now+300000);
+ const bosses=[40,50,60,70,75,80].map(level=>({level,interval_seconds:28800,anchor_kst:kstISO(now+86400000)}));
+ bosses[4].anchor_kst=first;bosses[5].anchor_kst=first;
+ await db.exec('reset role;');
+ await db.query('update public.eclipse_timer_state set bosses=$1 where id=1',[JSON.stringify(bosses)]);
+ await role('anon');await save();await run('eclipse_push_test',[A,token]);
+ await role('service_role');const [job]=await run('eclipse_push_claim');
+ assert.equal(job.payload.title,'[테스트] Lv.75 필드보스');
+ assert.equal(job.payload.body,'다음 리젠 · '+first.slice(5,10).replace('-','/')+' '+first.slice(11)+' (한국시간)');
+});
+
+test('manual push selects shared edits made after the device subscribed',async()=>{
+ await save();
+ const changed=kstISO(Date.now()+120000);
+ await db.exec('reset role;');
+ await db.query("update public.eclipse_timer_state set bosses=jsonb_set(bosses,'{5,anchor_kst}',to_jsonb($1::text)) where id=1",[changed]);
+ await role('anon');await run('eclipse_push_test',[A,token]);
+ await role('service_role');const [job]=await run('eclipse_push_claim');
+ assert.equal(job.payload.title,'[테스트] Lv.80 필드보스');
+ assert.ok(job.payload.body.includes(changed.slice(11)));
+});
+
+test('manual push rejects a disabled server without consuming the test allowance',async()=>{
+ await save();
+ await db.exec('reset role; update public.eclipse_push_config set enabled=false;');
+ await role('anon');await assert.rejects(run('eclipse_push_test',[A,token]),/PUSH_NOT_CONFIGURED/);
+ await db.exec('reset role; update public.eclipse_push_config set enabled=true;');
+ await role('anon');assert.equal(await run('eclipse_push_test',[A,token]),true);
+ await role('service_role');assert.equal((await run('eclipse_push_claim')).length,1);
+});

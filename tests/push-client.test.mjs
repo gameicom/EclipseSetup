@@ -92,3 +92,19 @@ test('service worker displays server alarms and notification clicks stay inside 
  listeners.notificationclick({notification:{close(){},data:{url:'https://evil.test'}},waitUntil:value=>{work=value;}});
  await work;assert.deepEqual(opened,[scope]);
 });
+
+test('test push requires this device to be enabled and reports throttling without false success',async()=>{
+ const push=new PushAlerts(client);await push.init();calls=[];
+ await assert.rejects(push.test(),/먼저/);assert.deepEqual(calls,[]);
+ await push.enable();
+ const before=push.message;
+ client.rpc=async(name,args)=>{
+  assert.equal(name,'eclipse_push_test');
+  assert.deepEqual(args,{p_device:push.device.id,p_token:push.device.token});
+  return {error:{message:'WAIT_ONE_MINUTE'}};
+ };
+ await assert.rejects(push.test(),/1분에 한 번/);
+ assert.equal(push.message,before);
+ client.rpc=async()=>({data:true,error:null});
+ await push.test();assert.match(push.message,/가장 가까운 보스/);
+});

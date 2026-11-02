@@ -80,15 +80,33 @@ end;
 $$;
 create or replace function public.eclipse_push_test(p_device uuid,p_token text)
 returns boolean language plpgsql security definer set search_path='' as $$
+declare v_now timestamptz:=clock_timestamp(); v_level integer; v_due timestamptz;
 begin
  if not public.eclipse_push_owns(p_device,p_token) then raise exception 'PUSH_ACCESS_DENIED' using errcode='42501'; end if;
- update public.eclipse_push_subscriptions set test_requested_at=clock_timestamp()
- where device_id=p_device and (test_requested_at is null or test_requested_at<clock_timestamp()-interval '1 minute');
+ if not exists(select 1 from public.eclipse_push_config where id=1 and enabled)
+ then raise exception 'PUSH_NOT_CONFIGURED'; end if;
+ -- Select from current shared settings using server time, including future anchors.
+ select level,due into v_level,v_due from (
+  select level,case when anchor>v_now then anchor else
+   anchor+((floor(extract(epoch from (v_now-anchor))/period)+1)*period)*interval '1 second'
+   end as due
+  from (
+   select (b->>'level')::integer as level,
+    (b->>'anchor_kst')::timestamp at time zone 'Asia/Seoul' as anchor,
+    (b->>'interval_seconds')::integer as period
+   from public.eclipse_timer_state s, jsonb_array_elements(s.bosses) b where s.id=1
+  ) settings
+ ) upcoming order by due,level limit 1;
+ if not found then raise exception 'PUSH_TIMER_UNAVAILABLE'; end if;
+ update public.eclipse_push_subscriptions set test_requested_at=v_now
+ where device_id=p_device and (test_requested_at is null or test_requested_at<v_now-interval '1 minute');
  if not found then raise exception 'WAIT_ONE_MINUTE'; end if;
  insert into public.eclipse_push_jobs(device_id,event_key,payload,due_at)
- values(p_device,'test:'||floor(extract(epoch from clock_timestamp())/60)::text,
- jsonb_build_object('title','이클립스 · 푸시 테스트','body','서버에서 보낸 알림입니다. 사이트를 닫아도 이 기기로 알림을 받을 수 있습니다.','tag','eclipse-push-test'),
- clock_timestamp()) on conflict do nothing;
+ values(p_device,'test:'||floor(extract(epoch from v_now)/60)::text,
+ jsonb_build_object('title','[테스트] Lv.'||v_level||' 필드보스',
+  'body','다음 리젠 · '||to_char(v_due at time zone 'Asia/Seoul','MM/DD HH24:MI:SS')||' (한국시간)',
+  'tag','eclipse-push-test','timestamp',floor(extract(epoch from v_now)*1000)),
+ v_now) on conflict do nothing;
  return true;
 end;
 $$;
