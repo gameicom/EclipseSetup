@@ -23,7 +23,7 @@ after(()=>db.close());
 beforeEach(async()=>{
  await db.exec("reset role; truncate public.eclipse_push_subscriptions cascade; update public.eclipse_push_config set enabled=true,public_key='test-key',last_checked=clock_timestamp()-interval '90 seconds',broadcast_requested_at=null where id=1;");
  const now=Date.now();
- const bosses=[40,50,60,70,75,80].map((level,index)=>({level,interval_seconds:28800,anchor_kst:kstISO(now+(index?86400000:-40000))}));
+ const bosses=[40,50,60,70,75,80].map((level,index)=>({level,interval_seconds:28800,anchor_kst:kstISO(now+(index?86400000:140000))}));
  await db.query('update public.eclipse_timer_state set bosses=$1 where id=1',[JSON.stringify(bosses)]);
  await role('anon');
 });
@@ -78,10 +78,8 @@ test('editing a boss cancels queued alarms based on its old settings',async()=>{
  await role('service_role');
  assert.equal((await run('eclipse_push_claim')).length,0);
 });
-test('new subscribers do not get earlier alarms and old missed alarms are not replayed',async()=>{
+test('respawns that have passed are never replayed even after a long outage',async()=>{
  await save();
- await role('service_role');
- assert.equal(await run('eclipse_push_enqueue'),0);
  await db.exec("reset role; update public.eclipse_push_subscriptions set created_at=clock_timestamp()-interval '1 day'; update public.eclipse_push_config set last_checked=clock_timestamp()-interval '1 day';");
  await db.query("update public.eclipse_timer_state set bosses=jsonb_set(bosses,'{0,anchor_kst}',to_jsonb($1::text))",[kstISO(Date.now()-600000)]);
  await role('service_role');
@@ -278,7 +276,7 @@ test('numbered secrets preserve keys and authenticate real Apple push encryption
   assert.equal((await handler(request({health:true}))).status,200);
   assert.equal(deliveries,0,'health does not send a notification');
   const response=await handler(request({}));
-  assert.equal(response.status,200);assert.deepEqual(await response.json(),{sent:1,retry:0,removed:0});
+  assert.equal(response.status,200);assert.deepEqual(await response.json(),{sent:1,retry:0,removed:0,expired:0});
   assert.deepEqual(finished,[{p_id:9,p_result:'sent'}]);
  }
 });
@@ -295,4 +293,29 @@ test('named secrets take precedence over numbered values and are not disclosed',
  assert.equal((await handler(request('old-secret'))).status,401);
  const response=await handler(request('named-secret'));
  assert.equal(response.status,200);assert.deepEqual(await response.json(),{ready:true});
+});
+
+test('dispatch expires late warnings and caps provider TTL at respawn',async()=>{
+ let claimed=false,deliveries=0;const finished=[],lifetimes=[];
+ const expires=new Date(Date.now()+60000).toISOString();
+ const handler=createPushHandler({
+  env:name=>({ECLIPSE_PUSH_SECRET:'secret',SUPABASE_URL:'https://test.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'service',
+   ECLIPSE_VAPID_PUBLIC_KEY:'public',ECLIPSE_VAPID_PRIVATE_KEY:'private'})[name],
+  generateRequestDetails:(subscription,payload,options)=>{lifetimes.push(options.TTL);return {endpoint:subscription.endpoint,method:'POST',headers:{},body:'encrypted'};},
+  fetchImpl:async(url,options)=>{
+   if(url.endsWith('/eclipse_push_claim')){
+    const list=claimed?[]:[
+     {id:1,expires_at:new Date(Date.now()-1000).toISOString(),subscription:sub(A),payload:{}},
+     {id:2,expires_at:expires,subscription:sub(B),payload:{}}];
+    claimed=true;return Response.json(list);
+   }
+   if(url.endsWith('/eclipse_push_finish')){finished.push(JSON.parse(options.body));return Response.json(true);}
+   deliveries++;return new Response(null,{status:201});
+  }
+ });
+ const response=await handler(new Request('https://test/push',{method:'POST',headers:{Authorization:'Bearer secret'},body:'{}'}));
+ assert.equal(response.status,200);assert.equal(deliveries,1);
+ assert.ok(lifetimes[0]>0 && lifetimes[0]<=60);
+ assert.ok(finished.some(result=>result.p_id===1 && result.p_result==='expired'));
+ assert.deepEqual(await response.json(),{sent:1,retry:0,removed:0,expired:1});
 });

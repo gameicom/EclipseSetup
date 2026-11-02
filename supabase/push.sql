@@ -6,6 +6,12 @@ create table if not exists public.eclipse_push_config (
 );
 insert into public.eclipse_push_config(id) values(1) on conflict do nothing;
 alter table public.eclipse_push_config add column if not exists broadcast_requested_at timestamptz;
+alter table public.eclipse_push_config add column if not exists function_url text not null default 'https://xywqclfppwsiiydlniba.supabase.co/functions/v1/boss-push';
+alter table public.eclipse_push_config add column if not exists wake_at timestamptz;
+alter table public.eclipse_push_config add column if not exists wake_job_id bigint;
+alter table public.eclipse_push_config add column if not exists dispatch_requested_at timestamptz;
+alter table public.eclipse_push_config add column if not exists housekeeping_at timestamptz;
+alter table public.eclipse_push_config add column if not exists schedule_mode text not null default 'polling';
 create table if not exists public.eclipse_push_subscriptions (
   device_id uuid primary key, token_hash text not null, subscription jsonb not null,
   endpoint text not null unique, created_at timestamptz not null default clock_timestamp(),
@@ -18,6 +24,9 @@ create table if not exists public.eclipse_push_jobs (
   boss jsonb, attempts integer not null default 0, leased_until timestamptz,
   sent_at timestamptz, unique(device_id,event_key)
 );
+alter table public.eclipse_push_jobs add column if not exists expires_at timestamptz;
+-- Retire unsent alarms from the previous at-respawn behavior.
+delete from public.eclipse_push_jobs where sent_at is null and event_key like 'boss:%';
 create index if not exists eclipse_push_pending on public.eclipse_push_jobs(due_at) where sent_at is null;
 alter table public.eclipse_push_config enable row level security;
 alter table public.eclipse_push_subscriptions enable row level security;
@@ -27,8 +36,8 @@ revoke all on sequence public.eclipse_push_jobs_id_seq from public,anon,authenti
 
 create or replace function public.eclipse_push_info()
 returns jsonb language sql stable security definer set search_path='' as $$
- select jsonb_build_object('enabled',enabled and last_checked > now()-interval '3 minutes',
-   'public_key',public_key,'test_audience','all') from public.eclipse_push_config where id=1;
+ select jsonb_build_object('enabled',enabled and last_checked > now()-interval '90 minutes',
+   'public_key',public_key,'test_audience','all','lead_seconds',180,'schedule_mode',schedule_mode) from public.eclipse_push_config where id=1;
 $$;
 create or replace function public.eclipse_push_owns(p_device uuid,p_token text)
 returns boolean language sql stable security definer set search_path='' as $$
@@ -52,8 +61,8 @@ begin
  or coalesce(p_subscription->'keys'->>'p256dh','') !~ '^[A-Za-z0-9_-]{87}$'
  or coalesce(p_subscription->'keys'->>'auth','') !~ '^[A-Za-z0-9_-]{22}$'
  then raise exception 'INVALID_PUSH_SUBSCRIPTION' using errcode='22023'; end if;
- if not exists(select 1 from public.eclipse_push_config where id=1 and enabled and public_key<>'')
- then raise exception 'PUSH_NOT_CONFIGURED'; end if;
+ perform 1 from public.eclipse_push_config where id=1 and enabled and public_key<>'' for update;
+ if not found then raise exception 'PUSH_NOT_CONFIGURED'; end if;
  perform pg_advisory_xact_lock(8102201);
  if exists(select 1 from public.eclipse_push_subscriptions where device_id=p_device)
  and not public.eclipse_push_owns(p_device,p_token)
@@ -75,6 +84,7 @@ returns boolean language plpgsql security definer set search_path='' as $$
 begin
  if not exists(select 1 from public.eclipse_push_subscriptions where device_id=p_device) then return true; end if;
  if not public.eclipse_push_owns(p_device,p_token) then raise exception 'PUSH_ACCESS_DENIED' using errcode='42501'; end if;
+ perform 1 from public.eclipse_push_config where id=1 for update;
  delete from public.eclipse_push_subscriptions where device_id=p_device;
  return true;
 end;
@@ -112,32 +122,45 @@ begin
   'body','다음 리젠 · '||to_char(v_due at time zone 'Asia/Seoul','MM/DD HH24:MI:SS')||' (한국시간)',
   'tag','eclipse-push-test','timestamp',floor(extract(epoch from v_now)*1000)),
  v_now from public.eclipse_push_subscriptions on conflict do nothing;
+ if to_regprocedure('public.eclipse_push_tick()') is not null then perform public.eclipse_push_tick(); end if;
  return true;
 end;
 $$;
 
--- Only a trusted scheduler can create deliveries and access subscription endpoints.
+-- Warning times repeat with the boss interval, shifted three minutes earlier.
+create or replace function public.eclipse_push_next_warning(p_boss jsonb,p_after timestamptz)
+returns timestamptz language sql immutable set search_path='' as $$
+ select case when anchor>p_after then anchor else
+  anchor+((floor(extract(epoch from (p_after-anchor))/period)+1)*period)*interval '1 second' end
+ from (select ((p_boss->>'anchor_kst')::timestamp at time zone 'Asia/Seoul')-interval '3 minutes' as anchor,
+  (p_boss->>'interval_seconds')::integer as period) settings;
+$$;
+revoke all on function public.eclipse_push_next_warning(jsonb,timestamptz) from public,anon,authenticated;
+
+-- Only the scheduler creates automatic deliveries and accesses subscription endpoints.
 create or replace function public.eclipse_push_enqueue()
 returns integer language plpgsql security definer set search_path='' as $$
-declare v_now timestamptz:=clock_timestamp(); v_last timestamptz; v_boss jsonb; v_anchor timestamptz;
- v_due timestamptz; v_period integer; v_level integer; v_count integer:=0; v_inserted integer;
+declare v_now timestamptz:=clock_timestamp(); v_boss jsonb; v_anchor timestamptz;
+ v_warning timestamptz; v_spawn timestamptz; v_period integer; v_level integer; v_count integer:=0; v_inserted integer;
 begin
- select last_checked into v_last from public.eclipse_push_config where id=1 and enabled for update;
+ perform 1 from public.eclipse_push_config where id=1 and enabled for update;
  if not found then return 0; end if;
+ delete from public.eclipse_push_jobs j where j.sent_at is null and j.boss is not null
+ and not exists(select 1 from public.eclipse_timer_state s,jsonb_array_elements(s.bosses) b where b=j.boss);
  for v_boss in select jsonb_array_elements(bosses) from public.eclipse_timer_state where id=1 loop
   v_anchor:=(v_boss->>'anchor_kst')::timestamp at time zone 'Asia/Seoul';
   v_period:=(v_boss->>'interval_seconds')::integer;
   v_level:=(v_boss->>'level')::integer;
-  if v_anchor>v_now then continue; end if;
-  v_due:=v_anchor+(floor(extract(epoch from (v_now-v_anchor))/v_period)*v_period)*interval '1 second';
-  if v_due>greatest(v_last,v_now-interval '2 minutes') and v_due<=v_now then
-   insert into public.eclipse_push_jobs(device_id,event_key,payload,due_at,boss)
-   select device_id,'boss:'||v_level||':'||floor(extract(epoch from v_due))::text,
-    jsonb_build_object('title','Lv.'||v_level||' 필드보스 리젠',
-     'body',to_char(v_due at time zone 'Asia/Seoul','HH24:MI')||' · 설정된 리젠 시각입니다.',
-     'tag','eclipse-boss-'||v_level||'-'||floor(extract(epoch from v_due))::text,
-     'timestamp',floor(extract(epoch from v_due)*1000)),
-    v_due,v_boss from public.eclipse_push_subscriptions where created_at<=v_due
+  v_warning:=public.eclipse_push_next_warning(v_boss,v_now)-v_period*interval '1 second';
+  v_spawn:=v_warning+interval '3 minutes';
+  if v_warning>=v_anchor-interval '3 minutes' and v_warning<=v_now and v_spawn>v_now then
+   insert into public.eclipse_push_jobs(device_id,event_key,payload,due_at,boss,expires_at)
+   select device_id,'warning:'||v_level||':'||floor(extract(epoch from v_spawn))::text,
+    jsonb_build_object('title','Lv.'||v_level||case when v_now-v_warning<interval '15 seconds' then ' 리젠 3분 전' else ' 리젠 임박' end,
+     'body',to_char(v_spawn at time zone 'Asia/Seoul','MM/DD HH24:MI:SS')||' 리젠 예정 · 한국시간',
+     'tag','eclipse-boss-'||v_level||'-'||floor(extract(epoch from v_spawn))::text,
+     'timestamp',floor(extract(epoch from v_now)*1000)),
+    v_warning,v_boss,v_spawn from public.eclipse_push_subscriptions
    on conflict do nothing;
    get diagnostics v_inserted=row_count; v_count:=v_count+v_inserted;
   end if;
@@ -157,14 +180,14 @@ begin
  and not exists(select 1 from public.eclipse_timer_state s, jsonb_array_elements(s.bosses) b where b=j.boss);
  with candidates as (
   select id from public.eclipse_push_jobs where sent_at is null and attempts<3
-   and due_at<=clock_timestamp() and due_at>clock_timestamp()-interval '5 minutes'
+   and due_at<=clock_timestamp() and coalesce(expires_at,due_at+interval '5 minutes')>clock_timestamp()
    and (leased_until is null or leased_until<clock_timestamp())
   order by due_at,id limit 100 for update skip locked
  ), claimed as (
   update public.eclipse_push_jobs j set leased_until=clock_timestamp()+interval '2 minutes',attempts=attempts+1
   from candidates c where j.id=c.id returning j.*
  )
- select coalesce(jsonb_agg(jsonb_build_object('id',c.id,'subscription',s.subscription,'payload',c.payload)),'[]'::jsonb)
+ select coalesce(jsonb_agg(jsonb_build_object('id',c.id,'subscription',s.subscription,'payload',c.payload,'expires_at',coalesce(c.expires_at,c.due_at+interval '5 minutes'))),'[]'::jsonb)
  into v_jobs from claimed c join public.eclipse_push_subscriptions s using(device_id);
  return v_jobs;
 end;
@@ -173,9 +196,12 @@ create or replace function public.eclipse_push_finish(p_id bigint,p_result text)
 returns boolean language plpgsql security definer set search_path='' as $$
 begin
  if p_result='gone' then
+  perform 1 from public.eclipse_push_config where id=1 for update;
   delete from public.eclipse_push_subscriptions where device_id=(select device_id from public.eclipse_push_jobs where id=p_id);
  elsif p_result='sent' then
   update public.eclipse_push_jobs set sent_at=clock_timestamp() where id=p_id;
+ elsif p_result='expired' then
+  delete from public.eclipse_push_jobs where id=p_id;
  elsif p_result='retry' then
   -- Keep the lease until its timeout to avoid immediate retries in the same dispatch.
   null;

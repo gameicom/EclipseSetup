@@ -23,7 +23,7 @@ beforeEach(()=>{
  replace('localStorage',{getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value)});
  client={async rpc(name,args){
   calls.push(name);
-  if(name==='eclipse_push_info')return {data:{enabled:true,public_key:publicKey,test_audience:'all'},error:null};
+  if(name==='eclipse_push_info')return {data:{enabled:true,public_key:publicKey,test_audience:'all',lead_seconds:180,schedule_mode:'reserved'},error:null};
   if(name==='eclipse_push_status')return {data:owned,error:null};
   if(name==='eclipse_push_save' && failSave)return {data:null,error:{message:'unavailable'}};
   if(name==='eclipse_push_save')owned=true;
@@ -119,4 +119,16 @@ test('a new sender never uses the previous device-only SQL for a broadcast',asyn
  const push=new PushAlerts(client);await push.init();await push.enable();calls=[];
  await assert.rejects(push.test(),/업데이트 SQL/);
  assert.ok(!calls.includes('eclipse_push_test'));
+});
+
+test('an older server keeps opt-out available and does not promise three-minute scheduling',async()=>{
+ const originalRpc=client.rpc;
+ client.rpc=async(name,args)=>{
+  const result=await originalRpc(name,args);
+  if(name==='eclipse_push_info'){delete result.data.lead_seconds;delete result.data.schedule_mode;}
+  return result;
+ };
+ const push=new PushAlerts(client);await push.init();await push.enable();
+ assert.equal(push.enabled,true);assert.match(push.message,/업데이트/);
+ await push.disable();assert.equal(push.enabled,false);
 });

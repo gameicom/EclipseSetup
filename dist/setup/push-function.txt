@@ -49,7 +49,7 @@ export function createPushHandler({env,generateRequestDetails,fetchImpl=fetch}) 
           keys:{p256dh:vapidDetails.publicKey,auth:'AAAAAAAAAAAAAAAAAAAAAA'}},'health',{vapidDetails,TTL:60});
         return respond(200,{ready:true});
       }
-      let sent=0,retry=0,removed=0;
+      let sent=0,retry=0,removed=0,expired=0;
       const deadline=Date.now()+45000;
       for(let round=0;round<3 && Date.now()<deadline;round++) {
         const jobs=await rpc('eclipse_push_claim');
@@ -60,9 +60,11 @@ export function createPushHandler({env,generateRequestDetails,fetchImpl=fetch}) 
             const job=jobs[cursor++];
             let outcome='retry';
             try {
-              if(!validPushEndpoint(job.subscription?.endpoint)) outcome='gone';
+              const remaining=job.expires_at ? Math.ceil((Date.parse(job.expires_at)-Date.now())/1000) : 180;
+              if(!Number.isFinite(remaining) || remaining<=0) outcome='expired';
+              else if(!validPushEndpoint(job.subscription?.endpoint)) outcome='gone';
               else {
-                const details=generateRequestDetails(job.subscription,JSON.stringify(job.payload),{vapidDetails,TTL:180,urgency:'high',contentEncoding:'aes128gcm'});
+                const details=generateRequestDetails(job.subscription,JSON.stringify(job.payload),{vapidDetails,TTL:Math.min(180,remaining),urgency:'high',contentEncoding:'aes128gcm'});
                 const response=await fetchImpl(details.endpoint,{method:details.method,headers:details.headers,
                   body:details.body,signal:AbortSignal.timeout(10000),redirect:'error'});
                 outcome=response.ok?'sent':[404,410].includes(response.status)?'gone':'retry';
@@ -70,11 +72,11 @@ export function createPushHandler({env,generateRequestDetails,fetchImpl=fetch}) 
               }
             } catch {}
             await rpc('eclipse_push_finish',{p_id:job.id,p_result:outcome});
-            if(outcome==='sent') sent++; else if(outcome==='gone') removed++; else retry++;
+            if(outcome==='sent') sent++; else if(outcome==='gone') removed++; else if(outcome==='expired') expired++; else retry++;
           }
         }));
       }
-      return respond(200,{sent,retry,removed});
+      return respond(200,{sent,retry,removed,expired});
     } catch {
       // Never expose subscription endpoints, keys, or upstream response bodies.
       return respond(503,{error:'Push dispatch failed; pending deliveries will retry'});

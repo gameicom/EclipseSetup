@@ -11,6 +11,11 @@ export class PushAlerts {
     this.message='푸시 알림 준비 상태를 확인하고 있습니다.';
   }
   emit(message) {if(message) this.message=message; this.onChange(this);}
+  timingMessage() {
+    return this.info?.lead_seconds===180 && this.info?.schedule_mode==='reserved'
+      ? '이 기기로 보스 리젠 3분 전 알림을 받습니다. 기기나 통신 상태에 따라 수신이 늦어질 수 있습니다.'
+      : '이 기기의 푸시는 켜져 있습니다. 3분 전 알림을 적용하려면 관리자용 최초 설정에서 서버 예약을 업데이트해 주세요.';
+  }
   async rpc(name,args={}) {
     const {data,error}=await this.client.rpc(name,args);
     if(error) {
@@ -42,7 +47,7 @@ export class PushAlerts {
         this.enabled=await this.rpc('eclipse_push_status',{p_device:this.device.id,p_token:this.device.token});
         if(this.enabled) await this.save(subscription);
       }
-      this.emit(this.enabled ? '이 기기로 리젠 푸시를 받습니다. 보통 리젠 후 1분 이내에 발송합니다.' : Notification.permission==='denied' ? '알림이 차단되어 있습니다. 브라우저 사이트 설정에서 알림을 허용해 주세요.' : '푸시를 켜면 탭을 닫아도 리젠 알림을 받을 수 있습니다.');
+      this.emit(this.enabled ? this.timingMessage() : Notification.permission==='denied' ? '알림이 차단되어 있습니다. 브라우저 사이트 설정에서 알림을 허용해 주세요.' : '푸시를 켜면 탭을 닫아도 리젠 3분 전 알림을 받을 수 있습니다.');
     } catch {this.ready=false;this.emit('푸시 서버 설정을 확인할 수 없습니다. 서버 활성화 후 새로고침해 주세요.');}
   }
   async waitForWorker() {
@@ -83,7 +88,7 @@ export class PushAlerts {
     subscription ||= await this.registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:publicKey});
     try {await this.save(subscription);}
     catch(error) {if(!existing) await subscription.unsubscribe().catch(()=>{});throw error;}
-    this.enabled=true; this.emit('푸시를 켰습니다. 이 기기에서 사이트를 닫아도 서버가 리젠 알림을 보냅니다.');
+    this.enabled=true; this.emit(this.timingMessage());
   }
   async disable() {
     // Remove the server registration first, so a failed request cannot pretend it is off.

@@ -23,7 +23,7 @@ $('generate-keys').addEventListener('click',async()=>{
   const current=await getInfo();
   if(current?.public_key)throw new Error('이미 알림 키가 등록되어 있습니다. 기존 키를 유지하세요. 발송기 코드는 복사해 업데이트할 수 있습니다.');
   keys=await generatePushKeys();
-  prepared=buildPushSetup(materials.schema,materials.cron,keys,projectUrl);
+  prepared=buildPushSetup(materials.schema,materials.cron,keys,projectUrl,materials.scheduler);
   $('setup-secrets').value=prepared.secrets;
   for(const id of ['copy-secrets','copy-sql','verify-push'])$(id).disabled=false;
   status('키를 준비했습니다. 1 → 2 → 3 순서로 Supabase에 등록한 뒤 연결을 확인하세요.');
@@ -31,7 +31,7 @@ $('generate-keys').addEventListener('click',async()=>{
 });
 $('copy-secrets').addEventListener('click',()=>copy(prepared.secrets));
 $('copy-function').addEventListener('click',()=>copy(materials.functionCode));
-$('copy-update').addEventListener('click',()=>copy(materials.schema));
+$('copy-update').addEventListener('click',()=>copy(materials.update));
 $('copy-sql').addEventListener('click',()=>copy(prepared.sql));
 $('verify-push').addEventListener('click',async()=>{
  $('verify-push').disabled=true;
@@ -48,13 +48,13 @@ $('verify-push').addEventListener('click',async()=>{
 });
 try {
  if(sharedConfig.supabaseUrl!==projectUrl)throw new Error('프로젝트 주소가 일치하지 않습니다.');
- const names=['push-schema.sql','push-schedule.sql','push-function.txt'];
+ const names=['push-schema.sql','push-schedule.sql','push-function.txt','push-scheduler.sql','push-update.sql'];
  const content=await Promise.all(names.map(async name=>{
   const response=await fetch('./setup/'+name,{cache:'no-store'});
   if(!response.ok)throw new Error('설정 자료를 불러오지 못했습니다.');
   return response.text();
  }));
- materials={schema:content[0],cron:content[1],functionCode:content[2]};
+ materials={schema:content[0],cron:content[1],functionCode:content[2],scheduler:content[3],update:content[4]};
  $('copy-function').disabled=false;
  const info=await getInfo();
  if(info?.public_key) {

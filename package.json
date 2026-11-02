@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.mjs",
     "build": "node scripts/prepare-push-setup.mjs",
-    "test": "node --test tests/core.test.mjs tests/shared.test.mjs tests/push.test.mjs tests/push-client.test.mjs",
+    "test": "node --test tests/core.test.mjs tests/shared.test.mjs tests/push.test.mjs tests/push-client.test.mjs tests/push-scheduler.test.mjs",
     "verify:deploy": "node scripts/check-shared-config.mjs --online"
   },
   "devDependencies": {
