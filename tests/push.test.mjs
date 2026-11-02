@@ -250,3 +250,49 @@ test('opted-out devices are excluded from broadcasts and queued copies are remov
  await role('service_role');const jobs=await run('eclipse_push_claim');
  assert.equal(jobs.length,1);assert.equal(jobs[0].subscription.endpoint,sub(A).endpoint);
 });
+
+test('numbered secrets preserve keys and authenticate real Apple push encryption',async()=>{
+ const vapid=webpush.generateVAPIDKeys(),receiver=createECDH('prime256v1');receiver.generateKeys();
+ const subscription={endpoint:'https://web.push.apple.com/test/numbered',keys:{p256dh:receiver.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')}};
+ const dispatchSecret=randomBytes(32).toString('base64url');
+ for(const withNames of [false,true]) {
+  const value=(name,text)=>withNames?' '+name+'='+text+' ':text;
+  const values={
+   '1':value('ECLIPSE_VAPID_PUBLIC_KEY',vapid.publicKey),
+   '2':value('ECLIPSE_VAPID_PRIVATE_KEY',vapid.privateKey),
+   '3':value('ECLIPSE_PUSH_SECRET',dispatchSecret),
+   SUPABASE_URL:'https://test.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'service-key'
+  };
+  let claimed=false,deliveries=0;const finished=[];
+  const handler=createPushHandler({env:key=>values[key],generateRequestDetails:webpush.generateRequestDetails.bind(webpush),fetchImpl:async(url,options)=>{
+   if(url.endsWith('/eclipse_push_info'))return Response.json({public_key:vapid.publicKey});
+   if(url.endsWith('/eclipse_push_claim')){const jobs=claimed?[]:[{id:9,subscription,payload:{title:'Numbered key test',body:'Retain existing subscriptions'}}];claimed=true;return Response.json(jobs);}
+   if(url.endsWith('/eclipse_push_finish')){finished.push(JSON.parse(options.body));return Response.json(true);}
+   assert.equal(url,subscription.endpoint);deliveries++;
+   assert.equal(options.headers['Content-Encoding'],'aes128gcm');
+   assert.ok(!Buffer.from(options.body).includes(Buffer.from('Numbered key test')));
+   return new Response(null,{status:201});
+  }});
+  const request=body=>new Request('https://test/push',{method:'POST',headers:{Authorization:'Bearer '+dispatchSecret},body:JSON.stringify(body)});
+  assert.equal((await handler(new Request('https://test/push',{method:'POST',body:'{}'}))).status,401);
+  assert.equal((await handler(request({health:true}))).status,200);
+  assert.equal(deliveries,0,'health does not send a notification');
+  const response=await handler(request({}));
+  assert.equal(response.status,200);assert.deepEqual(await response.json(),{sent:1,retry:0,removed:0});
+  assert.deepEqual(finished,[{p_id:9,p_result:'sent'}]);
+ }
+});
+
+test('named secrets take precedence over numbered values and are not disclosed',async()=>{
+ const vapid=webpush.generateVAPIDKeys(),legacy=webpush.generateVAPIDKeys();
+ const values={ECLIPSE_PUSH_SECRET:'named-secret',ECLIPSE_VAPID_PUBLIC_KEY:vapid.publicKey,
+  ECLIPSE_VAPID_PRIVATE_KEY:vapid.privateKey,'1':legacy.publicKey,'2':legacy.privateKey,'3':'old-secret',
+  SUPABASE_URL:'https://test.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'service-key'};
+ const handler=createPushHandler({env:key=>values[key],generateRequestDetails:webpush.generateRequestDetails.bind(webpush),fetchImpl:async(url)=>{
+  assert.ok(url.endsWith('/eclipse_push_info'));return Response.json({public_key:vapid.publicKey});
+ }});
+ const request=secret=>new Request('https://test/push',{method:'POST',headers:{Authorization:'Bearer '+secret},body:JSON.stringify({health:true})});
+ assert.equal((await handler(request('old-secret'))).status,401);
+ const response=await handler(request('named-secret'));
+ assert.equal(response.status,200);assert.deepEqual(await response.json(),{ready:true});
+});

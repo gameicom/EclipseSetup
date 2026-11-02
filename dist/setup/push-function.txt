@@ -7,6 +7,14 @@ export function validPushEndpoint(value) {
       && /^(fcm\.googleapis\.com|([a-z0-9-]+\.)*push\.services\.mozilla\.com|web\.push\.apple\.com|[a-z0-9-]+\.notify\.windows\.com)$/.test(url.hostname);
   } catch {return false;}
 }
+function readSetupSecret(env,name,numberedName) {
+  // Keep the original keys when early setup used names 1, 2 and 3.
+  const named=env(name);
+  const raw=typeof named==='string' && named.trim() ? named : env(numberedName);
+  if(typeof raw!=='string') return '';
+  const value=raw.trim(),prefix=name+'=';
+  return value.startsWith(prefix) ? value.slice(prefix.length).trim() : value;
+}
 export function createPushHandler({env,generateRequestDetails,fetchImpl=fetch}) {
   return async request => {
     const origin=request.headers.get('Origin');
@@ -15,14 +23,14 @@ export function createPushHandler({env,generateRequestDetails,fetchImpl=fetch}) 
     const respond=(status,body)=>Response.json(body,{status,headers:cors});
     if(request.method==='OPTIONS') return new Response(null,{status:allowedOrigin?204:403,headers:cors});
     if(request.method!=='POST') return respond(405,{error:'POST required'});
-    const secret=env('ECLIPSE_PUSH_SECRET');
+    const secret=readSetupSecret(env,'ECLIPSE_PUSH_SECRET','3');
     if(!secret) return respond(503,{error:'Push is not configured'});
     if(request.headers.get('Authorization')!=='Bearer '+secret) return respond(401,{error:'Unauthorized'});
     const url=env('SUPABASE_URL');
     let serviceKey=env('SUPABASE_SERVICE_ROLE_KEY');
     try {const keys=JSON.parse(env('SUPABASE_SECRET_KEYS')||'{}');serviceKey=keys.default||Object.values(keys).find(key=>typeof key==='string'&&key.startsWith('sb_secret_'))||serviceKey;} catch {}
     const vapidDetails={subject:'https://gameicom.github.io/EclipseSetup/',
-      publicKey:env('ECLIPSE_VAPID_PUBLIC_KEY'),privateKey:env('ECLIPSE_VAPID_PRIVATE_KEY')};
+      publicKey:readSetupSecret(env,'ECLIPSE_VAPID_PUBLIC_KEY','1'),privateKey:readSetupSecret(env,'ECLIPSE_VAPID_PRIVATE_KEY','2')};
     if(!url || !serviceKey || !vapidDetails.publicKey || !vapidDetails.privateKey) return respond(503,{error:'Push is not configured'});
     const rpc=async(name,body={})=>{
       const response=await fetchImpl(url+'/rest/v1/rpc/'+name,{
