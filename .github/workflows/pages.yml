@@ -44,6 +44,7 @@ jobs:
         run: |
           node --check dist/app.js
           node --check dist/core.js
+          node --check dist/named.js
           node --check dist/shared.js
           node --check dist/audio.js
           node --check dist/push.js

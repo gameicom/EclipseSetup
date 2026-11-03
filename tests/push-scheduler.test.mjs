@@ -183,3 +183,26 @@ test('first-time web setup installs the same reservations and saves matching key
  assert.equal((await db.query('select decrypted_secret from vault.decrypted_secrets')).rows[0].decrypted_secret,keys.dispatchSecret);
  assert.equal((await jobs()).find(job=>job.jobname==='eclipse-boss-push').schedule,'0 * * * *');
 });
+
+test('named timers never change field reservations, enqueue push, or become manual test targets',async()=>{
+ await save();await owner();
+ const sql=await readFile(new URL('../supabase/named.sql',import.meta.url),'utf8');
+ await db.exec(sql);
+ const before=await config(),scheduled=await jobs(),field=structuredClone(bosses),http=await calls();
+ const named=(await run('eclipse_read_named_timers')).snapshot.bosses;
+ const proposed=[...named.map(b=>({...b,anchor_kst:kstISO(Date.now()+120000)})),{level:75,interval_seconds:1800,anchor_kst:kstISO(Date.now()+120000)}];
+ await anon();
+ const result=await run('eclipse_update_named_timers',[JSON.stringify(proposed),JSON.stringify(named),[71,72,73,74,75],'import',A]);
+ assert.equal(result.status,'ok');
+ await owner();
+ assert.deepEqual(await config(),before);
+ assert.deepEqual(await jobs(),scheduled);
+ assert.equal(await calls(),http);
+ assert.deepEqual((await run('eclipse_read_timers')).snapshot.bosses,field);
+ assert.equal(await run('eclipse_push_enqueue'),0);
+ assert.equal((await run('eclipse_push_claim')).length,0);
+ await anon();await run('eclipse_push_test',[A,token]);await owner();
+ const payloads=(await db.query('select payload from public.eclipse_push_jobs')).rows;
+ assert.ok(payloads.length>0);
+ assert.ok(payloads.every(row=>row.payload.title.includes('Lv.40')));
+});

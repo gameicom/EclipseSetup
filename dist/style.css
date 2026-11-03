@@ -49,3 +49,17 @@ body:not([data-connection="connected"]):not([data-connection="saving"]) .live-la
 .push-test #push-test-help{margin-top:5px;font-size:10px;color:var(--dim)}
 .push-test .button{flex-shrink:0;min-width:76px}
 @media(max-width:680px){.push-test{flex-wrap:wrap;gap:12px}.push-test .button{width:100%}}
+
+/* Tabs switch the visible group only; both live timer connections stay running. */
+.timer-navigation{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 22px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+.timer-tabs{display:flex;gap:6px;background:#0c120f;border:1px solid var(--line);border-radius:9px;padding:4px}
+.timer-tabs button{border:0;border-radius:6px;background:transparent;color:var(--muted);padding:11px 24px;font-size:14px;font-weight:600;min-height:44px}
+.timer-tabs button span{font-size:9px;letter-spacing:1px;margin-left:9px;color:var(--dim)}
+.timer-tabs button[aria-selected=true]{background:var(--raised);color:var(--accent);box-shadow:inset 0 0 0 1px #c2e99b25}
+.timer-tabs button[aria-selected=true] span{color:var(--accent)}
+.timer-navigation p,.group-description{font-size:11px;color:var(--muted);margin:0}
+.group-description{margin:0 0 18px}
+.toolbar{flex-wrap:wrap}.toolbar-actions{flex-wrap:wrap}
+#add-dialog .edit-row>label+label{margin-top:12px}
+#named-setup-link{margin-bottom:16px}
+@media(max-width:680px){.timer-navigation{align-items:flex-start;flex-direction:column;gap:10px;margin-bottom:18px}.timer-tabs{width:100%}.timer-tabs button{flex:1;padding:10px 16px}.timer-navigation p,.group-description{font-size:10px}.page-heading{gap:10px}.push-panel h2{line-height:1.6}}

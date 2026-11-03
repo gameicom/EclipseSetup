@@ -2,7 +2,7 @@ import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {combinePushSQL} from '../dist/push-setup-core.js';
 const target=new URL('../dist/setup/',import.meta.url);
 await mkdir(target,{recursive:true});
-for(const [source,destination] of [['push.sql','push-schema.sql'],['push-cron.sql','push-schedule.sql'],['push-scheduler.sql','push-scheduler.sql']]) {
+for(const [source,destination] of [['named.sql','named-update.sql'],['push.sql','push-schema.sql'],['push-cron.sql','push-schedule.sql'],['push-scheduler.sql','push-scheduler.sql']]) {
  await writeFile(new URL(destination,target),await readFile(new URL('../supabase/'+source,import.meta.url)));
 }
 await writeFile(new URL('push-update.sql',target),combinePushSQL(
